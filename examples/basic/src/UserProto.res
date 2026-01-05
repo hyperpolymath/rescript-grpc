@@ -1,4 +1,4 @@
-// Generated from user.proto by protoc-gen-rescript
+// Generated from examples/basic/protos/user.proto by protoc-gen-rescript
 // SPDX-License-Identifier: MPL-2.0
 // DO NOT EDIT - regenerate from .proto source
 
@@ -209,7 +209,7 @@ module User = {
       [
         Json.Encode.required("name", msg.name, Json.Encode.string),
         Json.Encode.required("id", msg.id, Json.Encode.int),
-        Json.Encode.required("status", msg.status, Status.toInt->Json.Encode.int),
+        Json.Encode.required("status", msg.status, v => Json.Encode.int(Status.toInt(v))),
       ],
       [
         Json.Encode.optional("email", msg.email, Json.Encode.string),

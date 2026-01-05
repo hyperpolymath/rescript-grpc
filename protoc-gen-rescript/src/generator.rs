@@ -248,7 +248,7 @@ impl Generator {
         match field.r#type() {
             Type::Double | Type::Float => "float".to_string(),
             Type::Int64 | Type::Uint64 | Type::Sint64 | Type::Fixed64 | Type::Sfixed64 => {
-                "Int64.t".to_string()
+                "bigint".to_string()
             }
             Type::Int32 | Type::Uint32 | Type::Sint32 | Type::Fixed32 | Type::Sfixed32 => {
                 "int".to_string()

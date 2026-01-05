@@ -32,8 +32,8 @@ module Encode = {
   let float = (f: float): Js.Json.t => Js.Json.number(f)
   let bool = (b: bool): Js.Json.t => Js.Json.boolean(b)
 
-  // Int64 as string (proto3 JSON mapping)
-  let int64 = (i: Int64.t): Js.Json.t => Js.Json.string(Int64.toString(i))
+  // Int64/BigInt as string (proto3 JSON mapping)
+  let int64 = (i: bigint): Js.Json.t => Js.Json.string(BigInt.toString(i))
 
   // Bytes as base64
   let bytes = (b: Js.Typed_array.Uint8Array.t): Js.Json.t => {
@@ -152,9 +152,17 @@ module Decode = {
 
   let bool = (json: Js.Json.t): option<bool> => Js.Json.decodeBoolean(json)
 
-  // Int64 from string
-  let int64 = (json: Js.Json.t): option<Int64.t> => {
-    Js.Json.decodeString(json)->Option.flatMap(Int64.fromString)
+  // Int64/BigInt from string
+  let int64 = (json: Js.Json.t): option<bigint> => {
+    switch Js.Json.decodeString(json) {
+    | Some(s) =>
+      try {
+        Some(BigInt.fromStringExn(s))
+      } catch {
+      | _ => None
+      }
+    | None => None
+    }
   }
 
   // Bytes from base64

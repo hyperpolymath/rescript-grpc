@@ -32,14 +32,16 @@ impl FieldInfo {
         if self.is_message {
             format!("{}.toJson", self.rescript_type.trim_end_matches(".t"))
         } else if self.is_enum {
-            format!("{}.toInt->Json.Encode.int", self.rescript_type.trim_end_matches(".t"))
+            // For enums, we need a lambda that converts then encodes
+            let enum_name = self.rescript_type.trim_end_matches(".t");
+            format!("v => Json.Encode.int({}.toInt(v))", enum_name)
         } else {
             match self.rescript_type.as_str() {
                 "string" => "Json.Encode.string".to_string(),
                 "int" => "Json.Encode.int".to_string(),
                 "float" => "Json.Encode.float".to_string(),
                 "bool" => "Json.Encode.bool".to_string(),
-                "Int64.t" => "Json.Encode.int64".to_string(),
+                "bigint" => "Json.Encode.int64".to_string(),
                 "Js.Typed_array.Uint8Array.t" => "Json.Encode.bytes".to_string(),
                 _ => "Json.Encode.string".to_string(),
             }
@@ -59,7 +61,7 @@ impl FieldInfo {
                 "int" => "Json.Decode.int".to_string(),
                 "float" => "Json.Decode.float".to_string(),
                 "bool" => "Json.Decode.bool".to_string(),
-                "Int64.t" => "Json.Decode.int64".to_string(),
+                "bigint" => "Json.Decode.int64".to_string(),
                 "Js.Typed_array.Uint8Array.t" => "Json.Decode.bytes".to_string(),
                 _ => "Json.Decode.string".to_string(),
             }
