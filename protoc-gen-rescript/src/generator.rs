@@ -7,7 +7,7 @@ use anyhow::Result;
 use prost_types::compiler::{code_generator_response, CodeGeneratorRequest, CodeGeneratorResponse};
 use prost_types::{DescriptorProto, EnumDescriptorProto, FieldDescriptorProto, FileDescriptorProto};
 
-use crate::templates::{EnumTemplate, FieldInfo, MessageTemplate, MethodInfo, ModuleTemplate, ServiceTemplate};
+use crate::templates::{EnumTemplate, FieldInfo, MessageTemplate, MethodInfo, ModuleTemplate, OneOfInfo, ServiceTemplate};
 use crate::Options;
 use prost_types::ServiceDescriptorProto;
 
@@ -182,11 +182,47 @@ impl Generator {
     fn generate_message(&self, desc: &DescriptorProto, options: &Options) -> Result<String> {
         let name = desc.name.as_deref().unwrap_or("UnknownMessage");
 
+        // Collect all fields with their oneof index
         let fields: Vec<FieldInfo> = desc
             .field
             .iter()
             .map(|f| self.field_to_info(f))
             .collect();
+
+        // Build oneof information
+        let mut oneofs: Vec<OneOfInfo> = Vec::new();
+        for (idx, oneof_desc) in desc.oneof_decl.iter().enumerate() {
+            let oneof_name = oneof_desc.name.as_deref().unwrap_or("unknownOneof");
+
+            // Skip synthetic oneofs created for proto3 optional fields
+            // A oneof with a single field that has proto3_optional is synthetic
+            let oneof_fields: Vec<FieldInfo> = fields
+                .iter()
+                .filter(|f| f.oneof_index == Some(idx as i32))
+                .cloned()
+                .collect();
+
+            // Check if this is a synthetic oneof (proto3 optional)
+            if oneof_fields.len() == 1 {
+                let field = desc.field.iter().find(|f| {
+                    f.oneof_index == Some(idx as i32)
+                });
+                if let Some(f) = field {
+                    if f.proto3_optional.unwrap_or(false) {
+                        // This is a synthetic oneof for proto3 optional, skip it
+                        continue;
+                    }
+                }
+            }
+
+            if !oneof_fields.is_empty() {
+                oneofs.push(OneOfInfo {
+                    name: self.to_rescript_field_name(oneof_name),
+                    rescript_name: self.to_rescript_type_name(oneof_name),
+                    fields: oneof_fields,
+                });
+            }
+        }
 
         // Handle nested types
         let mut nested = Vec::new();
@@ -204,6 +240,7 @@ impl Generator {
         let template = MessageTemplate {
             name: self.to_rescript_type_name(name),
             fields,
+            oneofs,
             nested,
             use_wasm: options.wasm,
         };
@@ -254,12 +291,31 @@ impl Generator {
         let is_message = matches!(field.r#type(), Type::Message);
         let is_enum = matches!(field.r#type(), Type::Enum);
 
+        // Get oneof index if this field is part of a oneof
+        let oneof_index = field.oneof_index;
+
+        // Check for well-known types
+        let type_name = field.type_name.as_deref().unwrap_or("");
+        let well_known_type = if self.is_well_known_type(type_name) {
+            Some(type_name.to_string())
+        } else {
+            None
+        };
+
         // In proto3:
         // - Scalar fields have default values (not optional) unless marked with `optional`
         // - Message fields are always optional (can be null)
         // - Repeated fields are arrays (not optional)
+        // - Oneof fields are handled separately (not optional in the traditional sense)
+        // - Well-known wrapper types are treated as optional scalars
         let is_optional = if is_repeated {
             false
+        } else if oneof_index.is_some() && !field.proto3_optional.unwrap_or(false) {
+            // Real oneof fields are not optional - the oneof itself is optional
+            false
+        } else if well_known_type.is_some() {
+            // Well-known types (especially wrappers) are always optional
+            true
         } else if is_message {
             true // Message fields are always optional in proto3
         } else {
@@ -278,6 +334,8 @@ impl Generator {
             is_repeated,
             is_message,
             is_enum,
+            oneof_index,
+            well_known_type,
         }
     }
 
@@ -298,11 +356,55 @@ impl Generator {
             Type::Message | Type::Enum => {
                 // Extract type name from fully qualified name
                 let type_name = field.type_name.as_deref().unwrap_or("unknown");
+
+                // Check for well-known types
+                if let Some(wkt_type) = self.well_known_type_to_rescript(type_name) {
+                    return wkt_type;
+                }
+
                 let simple_name = type_name.rsplit('.').next().unwrap_or(type_name);
                 format!("{}.t", self.to_rescript_type_name(simple_name))
             }
             Type::Group => "unit".to_string(), // Deprecated, treat as unit
         }
+    }
+
+    /// Map well-known types to ReScript types
+    fn well_known_type_to_rescript(&self, type_name: &str) -> Option<String> {
+        match type_name {
+            // Timestamp -> Js.Date.t
+            ".google.protobuf.Timestamp" => Some("Js.Date.t".to_string()),
+            // Duration -> float (seconds)
+            ".google.protobuf.Duration" => Some("float".to_string()),
+            // Empty -> unit
+            ".google.protobuf.Empty" => Some("unit".to_string()),
+            // Wrapper types -> unwrapped primitives
+            ".google.protobuf.DoubleValue" | ".google.protobuf.FloatValue" => {
+                Some("float".to_string())
+            }
+            ".google.protobuf.Int64Value"
+            | ".google.protobuf.UInt64Value"
+            | ".google.protobuf.SInt64Value" => Some("bigint".to_string()),
+            ".google.protobuf.Int32Value"
+            | ".google.protobuf.UInt32Value"
+            | ".google.protobuf.SInt32Value" => Some("int".to_string()),
+            ".google.protobuf.BoolValue" => Some("bool".to_string()),
+            ".google.protobuf.StringValue" => Some("string".to_string()),
+            ".google.protobuf.BytesValue" => Some("Js.Typed_array.Uint8Array.t".to_string()),
+            // Struct types -> JSON types
+            ".google.protobuf.Struct" => Some("Js.Dict.t<Js.Json.t>".to_string()),
+            ".google.protobuf.Value" => Some("Js.Json.t".to_string()),
+            ".google.protobuf.ListValue" => Some("array<Js.Json.t>".to_string()),
+            ".google.protobuf.NullValue" => Some("Js.Null.t<unit>".to_string()),
+            // Any -> special type with @type field
+            ".google.protobuf.Any" => Some("WellKnown.Any.t".to_string()),
+            _ => None,
+        }
+    }
+
+    /// Check if a type is a well-known type
+    fn is_well_known_type(&self, type_name: &str) -> bool {
+        type_name.starts_with(".google.protobuf.")
     }
 
     fn proto_to_module_name(&self, file_name: &str) -> String {

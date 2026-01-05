@@ -8,11 +8,18 @@ description = "WASM-compiled protobuf codec for ReScript"
 license = "MPL-2.0"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# Protobuf runtime
+# WASM bindgen for JS interop
+wasm-bindgen = "0.2"
+# Protobuf encoding/decoding
 prost = "0.13"
+# JSON for intermediate format
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+# Varint encoding
+integer-encoding = "4.0"
 
 [profile.release]
 opt-level = "z"      # Optimize for size

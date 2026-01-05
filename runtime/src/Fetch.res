@@ -46,3 +46,8 @@ type requestInit = {
 
 // Simple GET fetch
 @val external fetchGet: string => promise<Response.t> = "fetch"
+
+// Streaming support types
+type readableStream
+type streamReader
+type textDecoder
