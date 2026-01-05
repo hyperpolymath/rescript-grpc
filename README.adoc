@@ -1,0 +1,151 @@
+// SPDX-License-Identifier: MPL-2.0
+= rescript-grpc
+:toc: macro
+:toclevels: 3
+
+Protocol Buffer and gRPC support for ReScript via WASM-based codecs.
+
+toc::[]
+
+== Overview
+
+`rescript-grpc` provides a complete `.proto` → ReScript codegen pipeline:
+
+1. **protoc-gen-rescript** - A Rust-based protoc plugin that generates ReScript types
+2. **@rescript-grpc/runtime** - ReScript runtime for message encoding/decoding
+3. **@rescript-grpc/codec** - WASM-compiled protobuf codec (prost-based)
+
+== Architecture
+
+[source]
+----
+┌─────────────────────────────────────────────────────────────────┐
+│                    Build Time (protoc)                          │
+├─────────────────────────────────────────────────────────────────┤
+│  .proto  ──→  protoc-gen-rescript                               │
+│                    │                                            │
+│                    ├──→ messages.res   (ReScript types)         │
+│                    ├──→ messages.rs    (prost structs)          │
+│                    └──→ codec.rs       (encode/decode exports)  │
+│                              │                                  │
+│                              ▼                                  │
+│                    cargo build --target wasm32-unknown-unknown  │
+│                              │                                  │
+│                              ▼                                  │
+│                    proto_codec.wasm                             │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│                    Runtime                                      │
+├─────────────────────────────────────────────────────────────────┤
+│  open RescriptGrpc.Codec                                        │
+│                                                                 │
+│  let user: User.t = { name: "Alice", id: 42 }                   │
+│  let bytes = User.encode(user)                                  │
+│  let decoded = User.decode(bytes)                               │
+└─────────────────────────────────────────────────────────────────┘
+----
+
+== Installation
+
+=== Prerequisites
+
+* https://github.com/protocolbuffers/protobuf[protoc] (Protocol Buffer Compiler)
+* https://www.rust-lang.org/[Rust] with `wasm32-unknown-unknown` target
+* https://deno.land/[Deno] runtime
+
+=== Install the protoc plugin
+
+[source,bash]
+----
+cargo install --path protoc-gen-rescript
+----
+
+=== Add runtime dependency
+
+[source,json]
+----
+// deno.json
+{
+  "imports": {
+    "@rescript-grpc/runtime": "./node_modules/@rescript-grpc/runtime/src/index.res.js"
+  }
+}
+----
+
+== Usage
+
+=== Generate ReScript from .proto
+
+[source,bash]
+----
+protoc --rescript_out=./src \
+       --rescript_opt=wasm \
+       ./protos/user.proto
+----
+
+=== Use generated types
+
+[source,rescript]
+----
+// src/Example.res
+open UserProto
+
+let createUser = (name: string, id: int): User.t => {
+  name,
+  id,
+  email: None,
+}
+
+let sendUser = async (user: User.t) => {
+  let bytes = await User.encode(user)
+  // Send bytes over network...
+}
+----
+
+== Project Structure
+
+[source]
+----
+rescript-grpc/
+├── protoc-gen-rescript/     # Rust protoc plugin
+│   ├── Cargo.toml
+│   └── src/
+│       ├── main.rs          # Plugin entry point
+│       ├── generator.rs     # Code generation logic
+│       └── templates.rs     # ReScript code templates
+├── runtime/                 # @rescript-grpc/runtime
+│   ├── rescript.json
+│   └── src/
+│       ├── Codec.res        # WASM codec wrapper
+│       ├── Message.res      # Base message types
+│       └── Client.res       # gRPC-web client (future)
+├── codec/                   # WASM codec source
+│   ├── Cargo.toml
+│   └── src/
+│       └── lib.rs           # Allocator + codec exports
+└── examples/
+    └── basic/
+        ├── protos/
+        └── src/
+----
+
+== Roadmap
+
+* [x] Memory helpers in rescript-wasm-runtime
+* [ ] protoc plugin skeleton (Rust)
+* [ ] Type-only generation (no encode/decode)
+* [ ] WASM codec with prost
+* [ ] Full encode/decode support
+* [ ] gRPC-web client stubs
+* [ ] Streaming support
+
+== Related Projects
+
+* https://github.com/hyperpolymath/rescript-wasm-runtime[rescript-wasm-runtime] - WASM runtime for ReScript
+* https://github.com/tokio-rs/prost[prost] - Rust Protocol Buffers implementation
+* https://github.com/reebalazs/reproto[reproto] - Earlier ReScript protobuf attempt (abandoned)
+
+== License
+
+MPL-2.0. See link:LICENSE.txt[LICENSE.txt].
