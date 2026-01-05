@@ -1,5 +1,5 @@
 {
-  "name": "@rescript-grpc/runtime",
+  "name": "basic-example",
   "version": "0.1.0",
   "sources": {
     "dir": "src",
@@ -10,7 +10,7 @@
     "in-source": true
   },
   "suffix": ".res.js",
-  "bs-dependencies": ["rescript-wasm-runtime"],
+  "bs-dependencies": ["@rescript-grpc/runtime", "rescript-wasm-runtime"],
   "bsc-flags": ["-open RescriptCore"],
   "warnings": {
     "error": "+101"

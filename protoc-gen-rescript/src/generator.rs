@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 //! Code generation logic for ReScript from protobuf descriptors
 
+use std::collections::{HashMap, HashSet};
+
 use anyhow::Result;
 use prost_types::compiler::{code_generator_response, CodeGeneratorRequest, CodeGeneratorResponse};
 use prost_types::{DescriptorProto, EnumDescriptorProto, FieldDescriptorProto, FileDescriptorProto};
@@ -52,13 +54,16 @@ impl Generator {
 
         let mut modules = Vec::new();
 
-        // Generate enums
+        // Generate enums first (they have no dependencies)
         for enum_desc in &file.enum_type {
             modules.push(self.generate_enum(enum_desc)?);
         }
 
-        // Generate messages
-        for msg_desc in &file.message_type {
+        // Topologically sort messages by dependencies
+        let sorted_messages = self.topological_sort_messages(&file.message_type);
+
+        // Generate messages in dependency order
+        for msg_desc in sorted_messages {
             modules.push(self.generate_message(msg_desc, &self.options)?);
         }
 
@@ -78,6 +83,73 @@ impl Generator {
             content: Some(content),
             ..Default::default()
         })
+    }
+
+    /// Topologically sort messages so dependencies come before dependents
+    fn topological_sort_messages<'a>(
+        &self,
+        messages: &'a [DescriptorProto],
+    ) -> Vec<&'a DescriptorProto> {
+        // Build a map of message name -> message
+        let msg_map: HashMap<&str, &DescriptorProto> = messages
+            .iter()
+            .filter_map(|m| m.name.as_deref().map(|n| (n, m)))
+            .collect();
+
+        // Build dependency graph: message name -> set of message names it depends on
+        let mut deps: HashMap<&str, HashSet<&str>> = HashMap::new();
+        for msg in messages {
+            let name = msg.name.as_deref().unwrap_or("");
+            let mut msg_deps = HashSet::new();
+
+            for field in &msg.field {
+                if let Some(type_name) = &field.type_name {
+                    // Extract simple name from fully qualified name
+                    let simple_name = type_name.rsplit('.').next().unwrap_or(type_name);
+                    // Only add as dependency if it's a message in this file
+                    if msg_map.contains_key(simple_name) && simple_name != name {
+                        msg_deps.insert(simple_name);
+                    }
+                }
+            }
+
+            deps.insert(name, msg_deps);
+        }
+
+        // Kahn's algorithm for topological sort
+        let mut result = Vec::new();
+        let mut no_deps: Vec<&str> = deps
+            .iter()
+            .filter(|(_, d)| d.is_empty())
+            .map(|(n, _)| *n)
+            .collect();
+
+        while let Some(name) = no_deps.pop() {
+            if let Some(msg) = msg_map.get(name) {
+                result.push(*msg);
+            }
+
+            // Remove this node from all dependency sets
+            for (_, d) in deps.iter_mut() {
+                d.remove(name);
+            }
+
+            // Find new nodes with no dependencies
+            for (n, d) in deps.iter() {
+                if d.is_empty() && !result.iter().any(|m| m.name.as_deref() == Some(*n)) && !no_deps.contains(n) {
+                    no_deps.push(*n);
+                }
+            }
+        }
+
+        // If we didn't get all messages, there's a cycle - just append remaining
+        for msg in messages {
+            if !result.iter().any(|m| m.name == msg.name) {
+                result.push(msg);
+            }
+        }
+
+        result
     }
 
     fn generate_enum(&self, desc: &EnumDescriptorProto) -> Result<String> {
