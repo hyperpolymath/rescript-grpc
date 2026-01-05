@@ -8,16 +8,7 @@
 //! added to this crate by protoc-gen-rescript when --rescript_opt=wasm
 //! is specified.
 
-#![no_std]
-
-extern crate alloc;
-
-use alloc::vec::Vec;
-use core::slice;
-
-// Use wee_alloc for smaller WASM binary size
-#[global_allocator]
-static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
+use std::slice;
 
 /// Allocate memory for use by ReScript
 ///
@@ -28,7 +19,7 @@ static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 pub extern "C" fn alloc(size: usize) -> *mut u8 {
     let mut buf = Vec::with_capacity(size);
     let ptr = buf.as_mut_ptr();
-    core::mem::forget(buf);
+    std::mem::forget(buf);
     ptr
 }
 
@@ -92,7 +83,7 @@ impl WasmResult {
 
     pub fn err(code: i32) -> Self {
         Self {
-            ptr: core::ptr::null_mut(),
+            ptr: std::ptr::null_mut(),
             len: -code,
         }
     }
@@ -134,10 +125,3 @@ pub extern "C" fn decode_user(ptr: *const u8, len: usize) -> WasmResult {
     todo!()
 }
 */
-
-// Panic handler for no_std
-#[cfg(not(test))]
-#[panic_handler]
-fn panic(_info: &core::panic::PanicInfo) -> ! {
-    loop {}
-}

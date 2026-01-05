@@ -282,25 +282,25 @@ mod tests {
 
     #[test]
     fn test_proto_to_module_name() {
-        let gen = Generator::new(Options::default());
-        assert_eq!(gen.proto_to_module_name("user.proto"), "UserProto");
+        let generator = Generator::new(Options::default());
+        assert_eq!(generator.proto_to_module_name("user.proto"), "UserProto");
         assert_eq!(
-            gen.proto_to_module_name("path/to/user_service.proto"),
+            generator.proto_to_module_name("path/to/user_service.proto"),
             "UserServiceProto"
         );
     }
 
     #[test]
     fn test_to_rescript_field_name() {
-        let gen = Generator::new(Options::default());
-        assert_eq!(gen.to_rescript_field_name("user_name"), "userName");
-        assert_eq!(gen.to_rescript_field_name("type"), "type_");
+        let generator = Generator::new(Options::default());
+        assert_eq!(generator.to_rescript_field_name("user_name"), "userName");
+        assert_eq!(generator.to_rescript_field_name("type"), "type_");
     }
 
     #[test]
     fn test_to_rescript_variant() {
-        let gen = Generator::new(Options::default());
-        assert_eq!(gen.to_rescript_variant("SOME_VALUE"), "SomeValue");
-        assert_eq!(gen.to_rescript_variant("Active"), "Active");
+        let generator = Generator::new(Options::default());
+        assert_eq!(generator.to_rescript_variant("SOME_VALUE"), "SomeValue");
+        assert_eq!(generator.to_rescript_variant("Active"), "Active");
     }
 }

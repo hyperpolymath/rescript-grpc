@@ -2,7 +2,7 @@
 [package]
 name = "protoc-gen-rescript"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 authors = ["Hyperpolymath"]
 description = "Protocol Buffer compiler plugin for ReScript code generation"
 license = "MPL-2.0"

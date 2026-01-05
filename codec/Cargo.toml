@@ -2,7 +2,7 @@
 [package]
 name = "rescript-grpc-codec"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 authors = ["Hyperpolymath"]
 description = "WASM-compiled protobuf codec for ReScript"
 license = "MPL-2.0"
@@ -13,9 +13,6 @@ crate-type = ["cdylib"]
 [dependencies]
 # Protobuf runtime
 prost = "0.13"
-
-# WASM allocator
-wee_alloc = "0.4"
 
 [profile.release]
 opt-level = "z"      # Optimize for size
