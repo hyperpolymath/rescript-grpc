@@ -32,6 +32,36 @@ module Status = {
   }
 }
 
+
+module ListUsersRequest = {
+  type t = {
+    pageSize: int,
+    pageToken: string,
+  }
+
+  let make = (
+    ~pageSize,
+    ~pageToken
+  ): t => {
+    pageSize,
+    pageToken,
+  }
+}
+
+
+module GetUserRequest = {
+  type t = {
+    id: int,
+  }
+
+  let make = (
+    ~id
+  ): t => {
+    id,
+  }
+}
+
+
 module Address = {
   type t = {
     street: string,
@@ -52,6 +82,7 @@ module Address = {
     postalCode,
   }
 }
+
 
 module User = {
   type t = {
@@ -80,32 +111,6 @@ module User = {
   }
 }
 
-module GetUserRequest = {
-  type t = {
-    id: int,
-  }
-
-  let make = (
-    ~id
-  ): t => {
-    id,
-  }
-}
-
-module ListUsersRequest = {
-  type t = {
-    pageSize: int,
-    pageToken: string,
-  }
-
-  let make = (
-    ~pageSize,
-    ~pageToken
-  ): t => {
-    pageSize,
-    pageToken,
-  }
-}
 
 module ListUsersResponse = {
   type t = {
@@ -121,3 +126,5 @@ module ListUsersResponse = {
     nextPageToken,
   }
 }
+
+

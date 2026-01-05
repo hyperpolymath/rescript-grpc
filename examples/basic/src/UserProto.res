@@ -33,18 +33,47 @@ module Status = {
 }
 
 
+module ListUsersRequest = {
+  type t = {
+    pageSize: int,
+    pageToken: string,
+  }
+
+  let make = (
+    ~pageSize,
+    ~pageToken
+  ): t => {
+    pageSize,
+    pageToken,
+  }
+}
+
+
+module GetUserRequest = {
+  type t = {
+    id: int,
+  }
+
+  let make = (
+    ~id
+  ): t => {
+    id,
+  }
+}
+
+
 module Address = {
   type t = {
-    street: option<string>,
-    city: option<string>,
-    country: option<string>,
+    street: string,
+    city: string,
+    country: string,
     postalCode: option<string>,
   }
 
   let make = (
-    ~street=?,
-    ~city=?,
-    ~country=?,
+    ~street,
+    ~city,
+    ~country,
     ~postalCode=?
   ): t => {
     street,
@@ -57,19 +86,19 @@ module Address = {
 
 module User = {
   type t = {
-    name: option<string>,
-    id: option<int>,
+    name: string,
+    id: int,
     email: option<string>,
-    status: option<Status.t>,
+    status: Status.t,
     tags: array<string>,
     address: option<Address.t>,
   }
 
   let make = (
-    ~name=?,
-    ~id=?,
+    ~name,
+    ~id,
     ~email=?,
-    ~status=?,
+    ~status,
     ~tags=[],
     ~address=?
   ): t => {
@@ -86,44 +115,15 @@ module User = {
 module ListUsersResponse = {
   type t = {
     users: array<User.t>,
-    nextPageToken: option<string>,
+    nextPageToken: string,
   }
 
   let make = (
     ~users=[],
-    ~nextPageToken=?
+    ~nextPageToken
   ): t => {
     users,
     nextPageToken,
-  }
-}
-
-
-module GetUserRequest = {
-  type t = {
-    id: option<int>,
-  }
-
-  let make = (
-    ~id=?
-  ): t => {
-    id,
-  }
-}
-
-
-module ListUsersRequest = {
-  type t = {
-    pageSize: option<int>,
-    pageToken: option<string>,
-  }
-
-  let make = (
-    ~pageSize=?,
-    ~pageToken=?
-  ): t => {
-    pageSize,
-    pageToken,
   }
 }
 
