@@ -212,14 +212,16 @@ impl Generator {
         let number = field.number.unwrap_or(0);
         let is_repeated = field.label() == prost_types::field_descriptor_proto::Label::Repeated;
 
+        let is_message = matches!(field.r#type(), Type::Message);
+        let is_enum = matches!(field.r#type(), Type::Enum);
+
         // In proto3:
         // - Scalar fields have default values (not optional) unless marked with `optional`
         // - Message fields are always optional (can be null)
         // - Repeated fields are arrays (not optional)
-        let is_message_type = matches!(field.r#type(), Type::Message);
         let is_optional = if is_repeated {
             false
-        } else if is_message_type {
+        } else if is_message {
             true // Message fields are always optional in proto3
         } else {
             // Scalar fields: only optional if proto3_optional is set
@@ -235,6 +237,8 @@ impl Generator {
             rescript_type,
             is_optional,
             is_repeated,
+            is_message,
+            is_enum,
         }
     }
 

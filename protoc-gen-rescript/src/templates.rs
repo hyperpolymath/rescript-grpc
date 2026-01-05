@@ -10,6 +10,8 @@ pub struct FieldInfo {
     pub rescript_type: String,
     pub is_optional: bool,
     pub is_repeated: bool,
+    pub is_message: bool,
+    pub is_enum: bool,
 }
 
 impl FieldInfo {
@@ -22,6 +24,45 @@ impl FieldInfo {
             format!("option<{}>", base)
         } else {
             base.clone()
+        }
+    }
+
+    /// Get the JSON encoder for this field's base type
+    pub fn json_encoder(&self) -> String {
+        if self.is_message {
+            format!("{}.toJson", self.rescript_type.trim_end_matches(".t"))
+        } else if self.is_enum {
+            format!("{}.toInt->Json.Encode.int", self.rescript_type.trim_end_matches(".t"))
+        } else {
+            match self.rescript_type.as_str() {
+                "string" => "Json.Encode.string".to_string(),
+                "int" => "Json.Encode.int".to_string(),
+                "float" => "Json.Encode.float".to_string(),
+                "bool" => "Json.Encode.bool".to_string(),
+                "Int64.t" => "Json.Encode.int64".to_string(),
+                "Js.Typed_array.Uint8Array.t" => "Json.Encode.bytes".to_string(),
+                _ => "Json.Encode.string".to_string(),
+            }
+        }
+    }
+
+    /// Get the JSON decoder for this field's base type
+    pub fn json_decoder(&self) -> String {
+        if self.is_message {
+            format!("{}.fromJson", self.rescript_type.trim_end_matches(".t"))
+        } else if self.is_enum {
+            let enum_name = self.rescript_type.trim_end_matches(".t");
+            format!("json => Json.Decode.int(json)->Option.flatMap({}.fromInt)", enum_name)
+        } else {
+            match self.rescript_type.as_str() {
+                "string" => "Json.Decode.string".to_string(),
+                "int" => "Json.Decode.int".to_string(),
+                "float" => "Json.Decode.float".to_string(),
+                "bool" => "Json.Decode.bool".to_string(),
+                "Int64.t" => "Json.Decode.int64".to_string(),
+                "Js.Typed_array.Uint8Array.t" => "Json.Decode.bytes".to_string(),
+                _ => "Json.Decode.string".to_string(),
+            }
         }
     }
 }
@@ -165,12 +206,139 @@ impl MessageTemplate {
         }
         out.push_str("  }\n");
 
+        // JSON codec functions
+        out.push_str(&self.render_json_codec());
+
         // WASM encode/decode stubs if enabled
         if self.use_wasm {
             out.push_str(&self.render_wasm_codec());
         }
 
         out.push_str("}\n");
+
+        out
+    }
+
+    fn render_json_codec(&self) -> String {
+        let mut out = String::new();
+
+        // toJson function
+        out.push_str("\n  // JSON serialization\n");
+        out.push_str("  let toJson = (msg: t): Js.Json.t => {\n");
+        out.push_str("    Json.Encode.object(Json.Encode.fields(\n");
+        out.push_str("      [\n");
+
+        // Required fields
+        for field in &self.fields {
+            if !field.is_optional && !field.is_repeated {
+                out.push_str(&format!(
+                    "        Json.Encode.required(\"{}\", msg.{}, {}),\n",
+                    field.proto_name,
+                    field.name,
+                    field.json_encoder()
+                ));
+            }
+        }
+
+        out.push_str("      ],\n");
+        out.push_str("      [\n");
+
+        // Optional and repeated fields
+        for field in &self.fields {
+            if field.is_optional {
+                out.push_str(&format!(
+                    "        Json.Encode.optional(\"{}\", msg.{}, {}),\n",
+                    field.proto_name,
+                    field.name,
+                    field.json_encoder()
+                ));
+            } else if field.is_repeated {
+                out.push_str(&format!(
+                    "        Json.Encode.repeated(\"{}\", msg.{}, {}),\n",
+                    field.proto_name,
+                    field.name,
+                    field.json_encoder()
+                ));
+            }
+        }
+
+        out.push_str("      ],\n");
+        out.push_str("    ))\n");
+        out.push_str("  }\n\n");
+
+        // fromJson function
+        out.push_str("  // JSON deserialization\n");
+        out.push_str("  let fromJson = (json: Js.Json.t): option<t> => {\n");
+        out.push_str("    switch Json.Decode.object(json) {\n");
+        out.push_str("    | Some(obj) =>\n");
+
+        // Build the result
+        let mut decode_lines = Vec::new();
+        for field in &self.fields {
+            if field.is_repeated {
+                decode_lines.push(format!(
+                    "        let {} = Json.Decode.repeated(obj, \"{}\", {})->Result.getOr([])",
+                    field.name, field.proto_name, field.json_decoder()
+                ));
+            } else if field.is_optional {
+                decode_lines.push(format!(
+                    "        let {} = Json.Decode.optional(obj, \"{}\", {})->Result.getOr(None)",
+                    field.name, field.proto_name, field.json_decoder()
+                ));
+            } else {
+                decode_lines.push(format!(
+                    "        let {} = Json.Decode.required(obj, \"{}\", {})",
+                    field.name, field.proto_name, field.json_decoder()
+                ));
+            }
+        }
+
+        for line in &decode_lines {
+            out.push_str(line);
+            out.push('\n');
+        }
+
+        // Check required fields and build result
+        let required_fields: Vec<_> = self.fields.iter()
+            .filter(|f| !f.is_optional && !f.is_repeated)
+            .collect();
+
+        if required_fields.is_empty() {
+            out.push_str("        Some({\n");
+            for field in &self.fields {
+                out.push_str(&format!("          {},\n", field.name));
+            }
+            out.push_str("        })\n");
+        } else {
+            // Check all required fields are Ok
+            out.push_str("        switch (");
+            for (i, field) in required_fields.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                out.push_str(&field.name);
+            }
+            out.push_str(") {\n");
+            out.push_str("        | (");
+            for (i, field) in required_fields.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                out.push_str(&format!("Ok({})", field.name));
+            }
+            out.push_str(") =>\n");
+            out.push_str("          Some({\n");
+            for field in &self.fields {
+                out.push_str(&format!("            {},\n", field.name));
+            }
+            out.push_str("          })\n");
+            out.push_str("        | _ => None\n");
+            out.push_str("        }\n");
+        }
+
+        out.push_str("    | None => None\n");
+        out.push_str("    }\n");
+        out.push_str("  }\n");
 
         out
     }
@@ -246,6 +414,8 @@ mod tests {
             rescript_type: "string".to_string(),
             is_optional: false,
             is_repeated: true,
+            is_message: false,
+            is_enum: false,
         };
         assert_eq!(field.full_type(), "array<string>");
 
@@ -255,6 +425,45 @@ mod tests {
             ..field.clone()
         };
         assert_eq!(optional.full_type(), "option<string>");
+    }
+
+    #[test]
+    fn test_json_encoders() {
+        let string_field = FieldInfo {
+            name: "name".to_string(),
+            proto_name: "name".to_string(),
+            number: 1,
+            rescript_type: "string".to_string(),
+            is_optional: false,
+            is_repeated: false,
+            is_message: false,
+            is_enum: false,
+        };
+        assert_eq!(string_field.json_encoder(), "Json.Encode.string");
+
+        let enum_field = FieldInfo {
+            name: "status".to_string(),
+            proto_name: "status".to_string(),
+            number: 2,
+            rescript_type: "Status.t".to_string(),
+            is_optional: false,
+            is_repeated: false,
+            is_message: false,
+            is_enum: true,
+        };
+        assert_eq!(enum_field.json_encoder(), "Status.toInt->Json.Encode.int");
+
+        let msg_field = FieldInfo {
+            name: "address".to_string(),
+            proto_name: "address".to_string(),
+            number: 3,
+            rescript_type: "Address.t".to_string(),
+            is_optional: true,
+            is_repeated: false,
+            is_message: true,
+            is_enum: false,
+        };
+        assert_eq!(msg_field.json_encoder(), "Address.toJson");
     }
 
     #[test]
