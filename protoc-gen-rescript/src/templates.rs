@@ -403,6 +403,167 @@ impl MessageTemplate {
     }
 }
 
+/// Information about an RPC method
+#[derive(Debug, Clone)]
+pub struct MethodInfo {
+    pub name: String,
+    pub input_type: String,
+    pub output_type: String,
+    pub client_streaming: bool,
+    pub server_streaming: bool,
+}
+
+/// Template for generating a gRPC-web service client
+pub struct ServiceTemplate {
+    pub name: String,
+    pub methods: Vec<MethodInfo>,
+}
+
+impl ServiceTemplate {
+    pub fn render(&self) -> String {
+        let mut out = String::new();
+
+        out.push_str(&format!("module {}Client = {{\n", self.name));
+
+        // Client configuration type
+        out.push_str("  // gRPC-web client configuration\n");
+        out.push_str("  type config = {\n");
+        out.push_str("    baseUrl: string,\n");
+        out.push_str("    headers: option<Js.Dict.t<string>>,\n");
+        out.push_str("  }\n\n");
+
+        // Default config
+        out.push_str("  let defaultConfig = {\n");
+        out.push_str("    baseUrl: \"http://localhost:8080\",\n");
+        out.push_str("    headers: None,\n");
+        out.push_str("  }\n\n");
+
+        // Error type
+        out.push_str("  type error =\n");
+        out.push_str("    | NetworkError(string)\n");
+        out.push_str("    | GrpcError(int, string)\n");
+        out.push_str("    | DecodeError(string)\n\n");
+
+        // Helper function for making requests
+        out.push_str("  // Internal fetch helper\n");
+        out.push_str("  let call = async (\n");
+        out.push_str("    ~config: config,\n");
+        out.push_str("    ~method: string,\n");
+        out.push_str("    ~request: Js.Json.t,\n");
+        out.push_str("  ): result<Js.Json.t, error> => {\n");
+        out.push_str("    let url = `${config.baseUrl}/${method}`\n");
+        out.push_str("    let headers = Js.Dict.fromArray([\n");
+        out.push_str("      (\"Content-Type\", \"application/json\"),\n");
+        out.push_str("      (\"Accept\", \"application/json\"),\n");
+        out.push_str("    ])\n");
+        out.push_str("    // Merge custom headers\n");
+        out.push_str("    switch config.headers {\n");
+        out.push_str("    | Some(h) => Js.Dict.entries(h)->Array.forEach(((k, v)) => Js.Dict.set(headers, k, v))\n");
+        out.push_str("    | None => ()\n");
+        out.push_str("    }\n\n");
+        out.push_str("    try {\n");
+        out.push_str("      let response = await Fetch.fetch(\n");
+        out.push_str("        url,\n");
+        out.push_str("        {\n");
+        out.push_str("          method: #POST,\n");
+        out.push_str("          headers: Fetch.Headers.fromDict(headers),\n");
+        out.push_str("          body: Fetch.Body.string(Js.Json.stringify(request)),\n");
+        out.push_str("        },\n");
+        out.push_str("      )\n");
+        out.push_str("      if Fetch.Response.ok(response) {\n");
+        out.push_str("        let json = await Fetch.Response.json(response)\n");
+        out.push_str("        Ok(json)\n");
+        out.push_str("      } else {\n");
+        out.push_str("        let status = Fetch.Response.status(response)\n");
+        out.push_str("        let text = await Fetch.Response.text(response)\n");
+        out.push_str("        Error(GrpcError(status, text))\n");
+        out.push_str("      }\n");
+        out.push_str("    } catch {\n");
+        out.push_str("    | Exn.Error(exn) => Error(NetworkError(Exn.message(exn)->Option.getOr(\"Unknown error\")))\n");
+        out.push_str("    | _ => Error(NetworkError(\"Unknown error\"))\n");
+        out.push_str("    }\n");
+        out.push_str("  }\n\n");
+
+        // Generate each RPC method
+        for method in &self.methods {
+            out.push_str(&self.render_method(method));
+            out.push('\n');
+        }
+
+        out.push_str("}\n");
+
+        out
+    }
+
+    fn render_method(&self, method: &MethodInfo) -> String {
+        let mut out = String::new();
+
+        // Method documentation comment
+        out.push_str(&format!("  // {} RPC\n", method.name));
+
+        // Method signature
+        out.push_str(&format!(
+            "  let {} = async (\n",
+            to_camel_case(&method.name)
+        ));
+        out.push_str("    ~config: config=defaultConfig,\n");
+        out.push_str(&format!("    ~request: {}.t,\n", method.input_type));
+        out.push_str(&format!("  ): result<{}.t, error> => {{\n", method.output_type));
+
+        // Encode request
+        out.push_str(&format!(
+            "    let requestJson = {}.toJson(request)\n",
+            method.input_type
+        ));
+
+        // Make the call
+        let rpc_path = format!("{}/{}", self.name, method.name);
+        out.push_str(&format!(
+            "    let response = await call(~config, ~method=\"{}\", ~request=requestJson)\n",
+            rpc_path
+        ));
+
+        // Decode response
+        out.push_str("    switch response {\n");
+        out.push_str("    | Ok(json) =>\n");
+        out.push_str(&format!(
+            "      switch {}.fromJson(json) {{\n",
+            method.output_type
+        ));
+        out.push_str("      | Some(msg) => Ok(msg)\n");
+        out.push_str("      | None => Error(DecodeError(\"Failed to decode response\"))\n");
+        out.push_str("      }\n");
+        out.push_str("    | Error(e) => Error(e)\n");
+        out.push_str("    }\n");
+        out.push_str("  }\n");
+
+        out
+    }
+}
+
+/// Convert PascalCase or snake_case to camelCase
+fn to_camel_case(name: &str) -> String {
+    let mut result = String::new();
+    let mut capitalize_next = false;
+    let mut first = true;
+
+    for c in name.chars() {
+        if c == '_' {
+            capitalize_next = true;
+        } else if first {
+            result.push(c.to_ascii_lowercase());
+            first = false;
+        } else if capitalize_next {
+            result.push(c.to_ascii_uppercase());
+            capitalize_next = false;
+        } else {
+            result.push(c);
+        }
+    }
+
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -453,7 +614,7 @@ mod tests {
             is_message: false,
             is_enum: true,
         };
-        assert_eq!(enum_field.json_encoder(), "Status.toInt->Json.Encode.int");
+        assert_eq!(enum_field.json_encoder(), "v => Json.Encode.int(Status.toInt(v))");
 
         let msg_field = FieldInfo {
             name: "address".to_string(),

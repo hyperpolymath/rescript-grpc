@@ -7,8 +7,9 @@ use anyhow::Result;
 use prost_types::compiler::{code_generator_response, CodeGeneratorRequest, CodeGeneratorResponse};
 use prost_types::{DescriptorProto, EnumDescriptorProto, FieldDescriptorProto, FileDescriptorProto};
 
-use crate::templates::{EnumTemplate, FieldInfo, MessageTemplate, ModuleTemplate};
+use crate::templates::{EnumTemplate, FieldInfo, MessageTemplate, MethodInfo, ModuleTemplate, ServiceTemplate};
 use crate::Options;
+use prost_types::ServiceDescriptorProto;
 
 pub struct Generator {
     options: Options,
@@ -67,7 +68,12 @@ impl Generator {
             modules.push(self.generate_message(msg_desc, &self.options)?);
         }
 
-        // TODO: Generate services if grpc option is enabled
+        // Generate services if grpc option is enabled
+        if self.options.grpc {
+            for service_desc in &file.service {
+                modules.push(self.generate_service(service_desc)?);
+            }
+        }
 
         let template = ModuleTemplate {
             package: package.to_string(),
@@ -200,6 +206,39 @@ impl Generator {
             fields,
             nested,
             use_wasm: options.wasm,
+        };
+
+        Ok(template.render())
+    }
+
+    fn generate_service(&self, desc: &ServiceDescriptorProto) -> Result<String> {
+        let name = desc.name.as_deref().unwrap_or("UnknownService");
+
+        let methods: Vec<MethodInfo> = desc
+            .method
+            .iter()
+            .map(|m| {
+                let method_name = m.name.as_deref().unwrap_or("unknownMethod");
+                let input = m.input_type.as_deref().unwrap_or(".Unknown");
+                let output = m.output_type.as_deref().unwrap_or(".Unknown");
+
+                // Extract simple type names from fully qualified names
+                let input_simple = input.rsplit('.').next().unwrap_or(input);
+                let output_simple = output.rsplit('.').next().unwrap_or(output);
+
+                MethodInfo {
+                    name: method_name.to_string(),
+                    input_type: self.to_rescript_type_name(input_simple),
+                    output_type: self.to_rescript_type_name(output_simple),
+                    client_streaming: m.client_streaming.unwrap_or(false),
+                    server_streaming: m.server_streaming.unwrap_or(false),
+                }
+            })
+            .collect();
+
+        let template = ServiceTemplate {
+            name: self.to_rescript_type_name(name),
+            methods,
         };
 
         Ok(template.render())

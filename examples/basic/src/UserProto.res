@@ -33,46 +33,6 @@ module Status = {
 }
 
 
-module GetUserRequest = {
-  type t = {
-    id: int,
-  }
-
-  let make = (
-    ~id
-  ): t => {
-    id,
-  }
-
-  // JSON serialization
-  let toJson = (msg: t): Js.Json.t => {
-    Json.Encode.object(Json.Encode.fields(
-      [
-        Json.Encode.required("id", msg.id, Json.Encode.int),
-      ],
-      [
-      ],
-    ))
-  }
-
-  // JSON deserialization
-  let fromJson = (json: Js.Json.t): option<t> => {
-    switch Json.Decode.object(json) {
-    | Some(obj) =>
-        let id = Json.Decode.required(obj, "id", Json.Decode.int)
-        switch (id) {
-        | (Ok(id)) =>
-          Some({
-            id,
-          })
-        | _ => None
-        }
-    | None => None
-    }
-  }
-}
-
-
 module ListUsersRequest = {
   type t = {
     pageSize: int,
@@ -110,6 +70,46 @@ module ListUsersRequest = {
           Some({
             pageSize,
             pageToken,
+          })
+        | _ => None
+        }
+    | None => None
+    }
+  }
+}
+
+
+module GetUserRequest = {
+  type t = {
+    id: int,
+  }
+
+  let make = (
+    ~id
+  ): t => {
+    id,
+  }
+
+  // JSON serialization
+  let toJson = (msg: t): Js.Json.t => {
+    Json.Encode.object(Json.Encode.fields(
+      [
+        Json.Encode.required("id", msg.id, Json.Encode.int),
+      ],
+      [
+      ],
+    ))
+  }
+
+  // JSON deserialization
+  let fromJson = (json: Js.Json.t): option<t> => {
+    switch Json.Decode.object(json) {
+    | Some(obj) =>
+        let id = Json.Decode.required(obj, "id", Json.Decode.int)
+        switch (id) {
+        | (Ok(id)) =>
+          Some({
+            id,
           })
         | _ => None
         }
@@ -290,6 +290,100 @@ module ListUsersResponse = {
     | None => None
     }
   }
+}
+
+
+module UserServiceClient = {
+  // gRPC-web client configuration
+  type config = {
+    baseUrl: string,
+    headers: option<Js.Dict.t<string>>,
+  }
+
+  let defaultConfig = {
+    baseUrl: "http://localhost:8080",
+    headers: None,
+  }
+
+  type error =
+    | NetworkError(string)
+    | GrpcError(int, string)
+    | DecodeError(string)
+
+  // Internal fetch helper
+  let call = async (
+    ~config: config,
+    ~method: string,
+    ~request: Js.Json.t,
+  ): result<Js.Json.t, error> => {
+    let url = `${config.baseUrl}/${method}`
+    let headers = Js.Dict.fromArray([
+      ("Content-Type", "application/json"),
+      ("Accept", "application/json"),
+    ])
+    // Merge custom headers
+    switch config.headers {
+    | Some(h) => Js.Dict.entries(h)->Array.forEach(((k, v)) => Js.Dict.set(headers, k, v))
+    | None => ()
+    }
+
+    try {
+      let response = await Fetch.fetch(
+        url,
+        {
+          method: #POST,
+          headers: Fetch.Headers.fromDict(headers),
+          body: Fetch.Body.string(Js.Json.stringify(request)),
+        },
+      )
+      if Fetch.Response.ok(response) {
+        let json = await Fetch.Response.json(response)
+        Ok(json)
+      } else {
+        let status = Fetch.Response.status(response)
+        let text = await Fetch.Response.text(response)
+        Error(GrpcError(status, text))
+      }
+    } catch {
+    | Exn.Error(exn) => Error(NetworkError(Exn.message(exn)->Option.getOr("Unknown error")))
+    | _ => Error(NetworkError("Unknown error"))
+    }
+  }
+
+  // GetUser RPC
+  let getUser = async (
+    ~config: config=defaultConfig,
+    ~request: GetUserRequest.t,
+  ): result<User.t, error> => {
+    let requestJson = GetUserRequest.toJson(request)
+    let response = await call(~config, ~method="UserService/GetUser", ~request=requestJson)
+    switch response {
+    | Ok(json) =>
+      switch User.fromJson(json) {
+      | Some(msg) => Ok(msg)
+      | None => Error(DecodeError("Failed to decode response"))
+      }
+    | Error(e) => Error(e)
+    }
+  }
+
+  // ListUsers RPC
+  let listUsers = async (
+    ~config: config=defaultConfig,
+    ~request: ListUsersRequest.t,
+  ): result<ListUsersResponse.t, error> => {
+    let requestJson = ListUsersRequest.toJson(request)
+    let response = await call(~config, ~method="UserService/ListUsers", ~request=requestJson)
+    switch response {
+    | Ok(json) =>
+      switch ListUsersResponse.fromJson(json) {
+      | Some(msg) => Ok(msg)
+      | None => Error(DecodeError("Failed to decode response"))
+      }
+    | Error(e) => Error(e)
+    }
+  }
+
 }
 
 
